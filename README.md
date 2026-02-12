@@ -1,2 +1,2 @@
 # ergodicity-simulation
-nteractive demonstration of the ergodicity problem in investment returns
+Interactive demonstration of the ergodicity problem in investment returns
