@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>The Ergodicity Problem — Anderson Quantrend Limited</title>
-<meta name="description" content="Interactive simulation demonstrating the ergodicity problem in investment returns. 20 independent simulations showing the divergence between ensemble averages and individual outcomes." />
+<meta name="description" content="Interactive simulation demonstrating the ergodicity problem in investment returns. Experience the divergence between ensemble averages and individual outcomes." />
 <meta property="og:title" content="The Ergodicity Problem — Anderson Quantrend Limited" />
 <meta property="og:description" content="Why the average return is real but irrelevant. An interactive proof." />
 <meta property="og:type" content="website" />
@@ -13,7 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet" />
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html { background: #0a0e17; color: #e2e8f0; }
+  html { background: #0a0e17; color: #e2e8f0; scroll-behavior: smooth; }
   body { font-family: 'DM Sans', 'Helvetica Neue', sans-serif; background: #0a0e17; min-height: 100vh; }
   #root { min-height: 100vh; }
 </style>
@@ -26,421 +26,584 @@
 
 <script>
 'use strict';
+var e = React.createElement, _s = React.useState, _r = React.useRef, _c = React.useCallback, _e = React.useEffect, _m = React.useMemo;
 
-const { useState, useRef, useCallback, useEffect, useMemo, createElement: h } = React;
-
-const COLORS = {
-  bg: "#0a0e17", bgCard: "#111827", border: "#1e293b",
-  text: "#e2e8f0", textMuted: "#94a3b8", textDim: "#64748b",
-  gold: "#f59e0b", goldLight: "#fbbf24", red: "#ef4444",
-  green: "#22c55e", accent: "#3b82f6",
+var C = {
+  bg:"#0a0e17", bgCard:"#111827", border:"#1e293b", text:"#e2e8f0",
+  textMuted:"#94a3b8", textDim:"#64748b", gold:"#f59e0b", goldLight:"#fbbf24",
+  red:"#ef4444", green:"#22c55e", accent:"#3b82f6"
 };
 
-const SIM_CONFIG = {
-  numRuns: 20, investorsPerRun: 100, weeksPerYear: 52, totalYears: 5,
-  get totalWeeks() { return this.weeksPerYear * this.totalYears; },
-  startingWealth: 100000, gainMultiplier: 1.50, lossMultiplier: 0.60,
+var PATH_COLORS = [
+  "#60a5fa","#818cf8","#a78bfa","#c084fc","#e879f9","#f472b6","#fb7185","#38bdf8",
+  "#34d399","#4ade80","#a3e635","#fbbf24","#fb923c","#f87171","#22d3ee","#2dd4bf",
+  "#67e8f9","#86efac","#d8b4fe","#93c5fd"
+];
+
+var CFG = {
+  investors: 100, display: 20, wpy: 52, years: 5, weeks: 260,
+  start: 100000, gain: 1.50, loss: 0.60, runs: 20
 };
 
-function generateAllRuns(numRuns, investorsPerRun, totalWeeks, gain, loss) {
-  const runs = [];
-  for (let r = 0; r < numRuns; r++) {
-    const outcomes = [];
-    for (let i = 0; i < investorsPerRun; i++) {
-      const path = [];
-      for (let j = 0; j < totalWeeks; j++) path.push(Math.random() < 0.5 ? gain : loss);
-      outcomes.push(path);
-    }
-    runs.push(outcomes);
+// ─── Shared math functions ───
+
+function genOutcomes(n, periods) {
+  var out = [];
+  for (var i = 0; i < n; i++) {
+    var p = [];
+    for (var j = 0; j < periods; j++) p.push(Math.random() < 0.5 ? CFG.gain : CFG.loss);
+    out.push(p);
   }
+  return out;
+}
+
+function calcPaths(outcomes, upTo, count) {
+  var paths = [];
+  for (var i = 0; i < count; i++) {
+    var v = [CFG.start];
+    for (var j = 0; j < upTo; j++) v.push(v[v.length-1] * outcomes[i][j]);
+    paths.push(v);
+  }
+  return paths;
+}
+
+function calcStats(outcomes, upTo, total) {
+  var ea = [CFG.start], mp = [CFG.start];
+  var w = new Float64Array(total); w.fill(CFG.start);
+  for (var t = 0; t < upTo; t++) {
+    var sum = 0;
+    for (var i = 0; i < total; i++) { w[i] *= outcomes[i][t]; sum += w[i]; }
+    ea.push(sum / total);
+    var s = Array.from(w).sort(function(a,b){return a-b;});
+    var mid = Math.floor(total/2);
+    mp.push(total%2 ? s[mid] : (s[mid-1]+s[mid])/2);
+  }
+  var rt = CFG.start * 0.1;
+  return {
+    ea: ea, mp: mp,
+    fA: ea[ea.length-1], fM: mp[mp.length-1],
+    ruined: Array.from(w).filter(function(x){return x<rt;}).length,
+    below: Array.from(w).filter(function(x){return x<CFG.start;}).length
+  };
+}
+
+function genAllRuns() {
+  var runs = [];
+  for (var r = 0; r < CFG.runs; r++) runs.push(genOutcomes(CFG.investors, CFG.weeks));
   return runs;
 }
 
-function calculateRunStats(outcomes, upToPeriod, startingWealth, totalInvestors) {
-  const ensembleAvg = [startingWealth], medianPath = [startingWealth];
-  const wealth = new Float64Array(totalInvestors);
-  wealth.fill(startingWealth);
-  for (let t = 0; t < upToPeriod; t++) {
-    let sum = 0;
-    for (let i = 0; i < totalInvestors; i++) { wealth[i] *= outcomes[i][t]; sum += wealth[i]; }
-    ensembleAvg.push(sum / totalInvestors);
-    const sorted = Array.from(wealth).sort((a, b) => a - b);
-    const mid = Math.floor(totalInvestors / 2);
-    medianPath.push(totalInvestors % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2);
+function calcAgg(allStats, cp) {
+  var len = cp+1, n = allStats.length;
+  var aa = new Array(len), am = new Array(len);
+  for (var t = 0; t < len; t++) {
+    var sA=0, sM=0;
+    for (var r = 0; r < n; r++) {
+      sA += (allStats[r].ea[t]||CFG.start);
+      sM += (allStats[r].mp[t]||CFG.start);
+    }
+    aa[t] = sA/n; am[t] = sM/n;
   }
-  const ruinThreshold = startingWealth * 0.1;
+  return {aa:aa, am:am};
+}
+
+function fm(v) {
+  if(v>=1e12) return '\u00A3'+(v/1e12).toFixed(1)+'T';
+  if(v>=1e9) return '\u00A3'+(v/1e9).toFixed(1)+'B';
+  if(v>=1e6) return '\u00A3'+(v/1e6).toFixed(1)+'M';
+  if(v>=1e3) return '\u00A3'+(v/1e3).toFixed(0)+'k';
+  if(v>=1) return '\u00A3'+v.toFixed(0);
+  if(v>=0.01) return '\u00A3'+v.toFixed(2);
+  return '\u00A3'+v.toExponential(1);
+}
+
+function fp(v) {
+  if(v>=10) return '+'+v.toFixed(0)+'%';
+  if(v>=0) return '+'+v.toFixed(1)+'%';
+  if(v>-10) return v.toFixed(1)+'%';
+  return v.toFixed(0)+'%';
+}
+
+// ─── Shared UI components ───
+
+function InsightCard(props) {
+  if (!props.visible) return null;
+  return e('div', {style:{background:C.bgCard, border:'1px solid '+props.color+'33', borderLeft:'3px solid '+props.color, borderRadius:8, padding:'14px 18px', marginBottom:12}},
+    e('div', {style:{fontSize:13, fontWeight:700, color:props.color, marginBottom:6, fontFamily:"'DM Sans', sans-serif", textTransform:'uppercase', letterSpacing:'0.05em'}}, props.title),
+    e('div', {style:{fontSize:14, color:C.text, lineHeight:1.6, fontFamily:"'DM Sans', sans-serif"}}, props.children)
+  );
+}
+
+function InfoBox(props) {
+  return e('div', {style:{background:C.bgCard, borderRadius:8, padding:16, border:'1px solid '+C.border}},
+    e('div', {style:{fontSize:11, color:C.textDim, textTransform:'uppercase', letterSpacing:'0.1em', marginBottom:4}}, props.title),
+    e('div', {style:{fontSize:14, color:C.text, lineHeight:1.5}}, props.children)
+  );
+}
+
+function StatCard(props) {
+  return e('div', {style:{background:C.bgCard, borderRadius:8, padding:'14px 16px', border:'1px solid '+C.border}},
+    e('div', {style:{fontSize:10, color:C.textDim, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6}}, props.label),
+    e('div', {style:{display:'flex', alignItems:'baseline', gap:8}},
+      e('span', {style:{fontSize:17, fontWeight:700, color:props.color, fontFamily:"'JetBrains Mono', monospace"}}, props.value),
+      props.detail ? e('span', {style:{fontSize:12, fontWeight:600, color:props.color, fontFamily:"'JetBrains Mono', monospace", opacity:0.7}}, props.detail) : null
+    ),
+    e('div', {style:{fontSize:11, color:C.textDim, marginTop:4, fontStyle:'italic'}}, props.sub)
+  );
+}
+
+function SpeedControls(props) {
+  return e('div', {style:{display:'flex', alignItems:'center', gap:8, marginLeft:'auto'}},
+    e('span', {style:{fontSize:12, color:C.textDim}}, 'Speed:'),
+    [{l:'1\u00D7',v:50,s:1},{l:'4\u00D7',v:30,s:4},{l:'13\u00D7',v:20,s:13}].map(function(x){
+      return e('button', {key:x.l, onClick:function(){props.setSpeed(x.v); props.setSteps(x.s);}, style:{
+        background: props.steps===x.s ? C.accent+'33':'transparent',
+        color: props.steps===x.s ? C.accent : C.textDim,
+        border:'1px solid '+(props.steps===x.s ? C.accent+'55':C.border),
+        borderRadius:6, padding:'4px 12px', fontSize:12, cursor:'pointer', fontFamily:"'JetBrains Mono', monospace"
+      }}, x.l);
+    })
+  );
+}
+
+// ─── Chart rendering helpers ───
+
+function chartScales(allValues, startW, cp, tp, pad, cW, cH) {
+  var minV = Math.max(Math.min.apply(null, allValues)*0.3, 0.001);
+  var maxV = Math.max.apply(null, allValues)*4;
+  var lMin = Math.log10(minV), lMax = Math.log10(maxV);
+  var lR = Math.max(lMax-lMin, 1);
   return {
-    ensembleAvg, medianPath,
-    finalAvg: ensembleAvg[ensembleAvg.length - 1],
-    finalMedian: medianPath[medianPath.length - 1],
-    ruinedCount: Array.from(wealth).filter(w => w < ruinThreshold).length,
-    belowStart: Array.from(wealth).filter(w => w < startingWealth).length,
+    minV:minV, lMin:lMin, lR:lR,
+    xS: function(t){return pad.l+(t/tp)*cW;},
+    yS: function(v){var lv=Math.log10(Math.max(v,minV)); return pad.t+cH-((lv-lMin)/lR)*cH;},
+    yTicks: (function(){
+      var ticks=[];
+      for(var ex=Math.floor(lMin); ex<=Math.ceil(lMax); ex++){
+        var val=Math.pow(10,ex);
+        if(val>=minV*0.8 && val<=maxV*1.2) ticks.push(val);
+      }
+      return ticks;
+    })()
   };
 }
 
-function calculateAggregateLines(allRunStats, currentPeriod, startingWealth) {
-  const len = currentPeriod + 1, numRuns = allRunStats.length;
-  const avgOfAvgs = new Array(len), avgOfMedians = new Array(len);
-  for (let t = 0; t < len; t++) {
-    let sA = 0, sM = 0;
-    for (let r = 0; r < numRuns; r++) {
-      sA += (allRunStats[r].ensembleAvg[t] || startingWealth);
-      sM += (allRunStats[r].medianPath[t] || startingWealth);
-    }
-    avgOfAvgs[t] = sA / numRuns; avgOfMedians[t] = sM / numRuns;
+function makePath(values, cp, xS, yS, minV) {
+  var ds = Math.max(1, Math.floor(cp/300)), d='', len=Math.min(values.length, cp+1);
+  for(var i=0;i<len;i++){
+    if(i===0||i===len-1||i%ds===0)
+      d+=(d===''?'M':'L')+' '+xS(i).toFixed(1)+' '+yS(Math.max(values[i],minV)).toFixed(1)+' ';
   }
-  return { avgOfAvgs, avgOfMedians };
+  return d;
 }
 
-function formatMoney(v) {
-  if (v >= 1e12) return '\u00A3' + (v/1e12).toFixed(1) + 'T';
-  if (v >= 1e9) return '\u00A3' + (v/1e9).toFixed(1) + 'B';
-  if (v >= 1e6) return '\u00A3' + (v/1e6).toFixed(1) + 'M';
-  if (v >= 1e3) return '\u00A3' + (v/1e3).toFixed(0) + 'k';
-  if (v >= 1) return '\u00A3' + v.toFixed(0);
-  if (v >= 0.01) return '\u00A3' + v.toFixed(2);
-  return '\u00A3' + v.toExponential(1);
-}
-
-function formatPct(v) {
-  if (v >= 10) return '+' + v.toFixed(0) + '%';
-  if (v >= 0) return '+' + v.toFixed(1) + '%';
-  if (v > -10) return v.toFixed(1) + '%';
-  return v.toFixed(0) + '%';
-}
-
-// Helper: create style object shorthand
-function s(obj) { return obj; }
-
-function SimulationChart({ allRunStats, aggregateLines, currentPeriod, totalPeriods, startingWealth }) {
-  const width = 840, height = 500;
-  const pad = { top: 30, right: 110, bottom: 50, left: 80 };
-  const cW = width - pad.left - pad.right, cH = height - pad.top - pad.bottom;
-  const { avgOfAvgs, avgOfMedians } = aggregateLines;
-
-  let allV = [startingWealth];
-  for (const st of allRunStats) {
-    allV = allV.concat(st.ensembleAvg.slice(0, currentPeriod + 1).filter(v => v > 0));
-    allV = allV.concat(st.medianPath.slice(0, currentPeriod + 1).filter(v => v > 0));
-  }
-  if (allV.length === 0) allV = [startingWealth];
-
-  const minVal = Math.max(Math.min(...allV) * 0.3, 0.001);
-  const maxVal = Math.max(...allV) * 4;
-  const logMin = Math.log10(minVal), logMax = Math.log10(maxVal);
-  const logRange = Math.max(logMax - logMin, 1);
-
-  const xS = t => pad.left + (t / totalPeriods) * cW;
-  const yS = v => { const lv = Math.log10(Math.max(v, minVal)); return pad.top + cH - ((lv - logMin) / logRange) * cH; };
-  const ds = Math.max(1, Math.floor(currentPeriod / 300));
-
-  const p2s = values => {
-    let d = ''; const len = Math.min(values.length, currentPeriod + 1);
-    for (let i = 0; i < len; i++) {
-      if (i === 0 || i === len - 1 || i % ds === 0)
-        d += (d === '' ? 'M' : 'L') + ' ' + xS(i).toFixed(1) + ' ' + yS(Math.max(values[i], minVal)).toFixed(1) + ' ';
-    }
-    return d;
-  };
-
-  const yTicks = [];
-  for (let e = Math.floor(logMin); e <= Math.ceil(logMax); e++) {
-    const v = Math.pow(10, e);
-    if (v >= minVal * 0.8 && v <= maxVal * 1.2) yTicks.push(v);
-  }
-  const xTicks = [];
-  for (let w = 0; w <= totalPeriods; w += 26) {
-    const y = w / 52;
-    xTicks.push({ w, label: y === Math.floor(y) ? Math.floor(y) + 'y' : y.toFixed(1) + 'y' });
-  }
-
-  const startY = yS(startingWealth);
-  const lastAA = avgOfAvgs[avgOfAvgs.length - 1] || startingWealth;
-  const lastAM = avgOfMedians[avgOfMedians.length - 1] || startingWealth;
-
-  const children = [];
-
-  // Background
-  children.push(h('rect', { key: 'bg', x: 0, y: 0, width, height, fill: COLORS.bg, rx: 8 }));
-
-  // Grid
-  yTicks.forEach(v => {
-    children.push(h('line', { key: 'yg' + v, x1: pad.left, y1: yS(v), x2: width - pad.right, y2: yS(v), stroke: COLORS.border, strokeDasharray: '3,3' }));
-    children.push(h('text', { key: 'yt' + v, x: pad.left - 12, y: yS(v) + 4, textAnchor: 'end', fill: COLORS.textDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }, formatMoney(v)));
+function chartGrid(sc, pad, w, h, tp) {
+  var ch = [];
+  sc.yTicks.forEach(function(v){
+    ch.push(e('line',{key:'yg'+v, x1:pad.l, y1:sc.yS(v), x2:w-pad.r, y2:sc.yS(v), stroke:C.border, strokeDasharray:'3,3'}));
+    ch.push(e('text',{key:'yt'+v, x:pad.l-12, y:sc.yS(v)+4, textAnchor:'end', fill:C.textDim, fontSize:10, fontFamily:"'JetBrains Mono', monospace"}, fm(v)));
   });
-  xTicks.forEach(({ w, label }) => {
-    children.push(h('line', { key: 'xg' + w, x1: xS(w), y1: pad.top, x2: xS(w), y2: height - pad.bottom, stroke: COLORS.border, strokeDasharray: '2,4' }));
-    children.push(h('text', { key: 'xt' + w, x: xS(w), y: height - pad.bottom + 18, textAnchor: 'middle', fill: COLORS.textDim, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }, label));
+  for(var wk=0; wk<=tp; wk+=26){
+    var yr=wk/52, lb=yr===Math.floor(yr)?Math.floor(yr)+'y':yr.toFixed(1)+'y';
+    ch.push(e('line',{key:'xg'+wk, x1:sc.xS(wk), y1:pad.t, x2:sc.xS(wk), y2:h-pad.b, stroke:C.border, strokeDasharray:'2,4'}));
+    ch.push(e('text',{key:'xt'+wk, x:sc.xS(wk), y:h-pad.b+18, textAnchor:'middle', fill:C.textDim, fontSize:10, fontFamily:"'JetBrains Mono', monospace"}, lb));
+  }
+  return ch;
+}
+
+// ─── SIMULATION 1: Single Run ───
+
+function SingleChart(props) {
+  var cp=props.cp, tp=CFG.weeks, dp=props.dp, st=props.st;
+  var w=840, h=470, pad={t:30,r:100,b:50,l:80}, cW=w-pad.l-pad.r, cH=h-pad.t-pad.b;
+
+  var allV=[CFG.start];
+  dp.forEach(function(p){
+    p.slice(0,cp+1).forEach(function(v){if(v>0)allV.push(v);});
   });
+  st.ea.slice(0,cp+1).forEach(function(v){if(v>0)allV.push(v);});
+  st.mp.slice(0,cp+1).forEach(function(v){if(v>0)allV.push(v);});
+
+  var sc=chartScales(allV, CFG.start, cp, tp, pad, cW, cH);
+  var ch=[e('rect',{key:'bg',x:0,y:0,width:w,height:h,fill:C.bg,rx:8})];
+  ch=ch.concat(chartGrid(sc,pad,w,h,tp));
 
   // Axis labels
-  children.push(h('text', { key: 'xl', x: pad.left + cW / 2, y: height - 6, textAnchor: 'middle', fill: COLORS.textMuted, fontSize: 12, fontFamily: "'DM Sans', sans-serif" }, 'Years'));
-  children.push(h('text', { key: 'yl', x: 14, y: pad.top + cH / 2, textAnchor: 'middle', fill: COLORS.textMuted, fontSize: 12, fontFamily: "'DM Sans', sans-serif", transform: 'rotate(-90, 14, ' + (pad.top + cH / 2) + ')' }, 'Portfolio Value (log scale)'));
+  ch.push(e('text',{key:'xl',x:pad.l+cW/2,y:h-6,textAnchor:'middle',fill:C.textMuted,fontSize:12,fontFamily:"'DM Sans', sans-serif"},'Years'));
+  ch.push(e('text',{key:'yl',x:14,y:pad.t+cH/2,textAnchor:'middle',fill:C.textMuted,fontSize:12,fontFamily:"'DM Sans', sans-serif",transform:'rotate(-90,14,'+(pad.t+cH/2)+')'},'Portfolio Value (log scale)'));
 
   // Start line
-  children.push(h('line', { key: 'start', x1: pad.left, y1: startY, x2: width - pad.right, y2: startY, stroke: COLORS.textDim, strokeDasharray: '8,4', opacity: 0.4 }));
-  children.push(h('text', { key: 'startl', x: width - pad.right + 5, y: startY + 4, fill: COLORS.textDim, fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }, '\u00A3100k'));
+  var sY=sc.yS(CFG.start);
+  ch.push(e('line',{key:'sl',x1:pad.l,y1:sY,x2:w-pad.r,y2:sY,stroke:C.textDim,strokeDasharray:'8,4',opacity:0.4}));
+  ch.push(e('text',{key:'slt',x:w-pad.r+5,y:sY+4,fill:C.textDim,fontSize:9,fontFamily:"'JetBrains Mono', monospace"},'\u00A3100k'));
 
-  // Thin individual run medians
-  allRunStats.forEach((st, r) => {
-    children.push(h('path', { key: 'tm' + r, d: p2s(st.medianPath), fill: 'none', stroke: COLORS.red, strokeWidth: 1, strokeDasharray: '4,3', opacity: 0.2, strokeLinejoin: 'round' }));
+  // Individual paths
+  dp.forEach(function(values,i){
+    var fv=values[Math.min(cp,values.length-1)];
+    var ruined=fv<CFG.start*0.1;
+    ch.push(e('path',{key:'p'+i, d:makePath(values,cp,sc.xS,sc.yS,sc.minV), fill:'none',
+      stroke:ruined?C.red:PATH_COLORS[i%20], strokeWidth:ruined?1.2:1.8,
+      opacity:ruined?0.45:0.6, strokeLinejoin:'round'}));
   });
 
-  // Thin individual run averages
-  allRunStats.forEach((st, r) => {
-    children.push(h('path', { key: 'ta' + r, d: p2s(st.ensembleAvg), fill: 'none', stroke: COLORS.gold, strokeWidth: 1, opacity: 0.2, strokeLinejoin: 'round' }));
-  });
+  // Median
+  if(cp>0) ch.push(e('path',{key:'med',d:makePath(st.mp,cp,sc.xS,sc.yS,sc.minV),fill:'none',stroke:C.red,strokeWidth:3,strokeDasharray:'8,4',opacity:0.95}));
 
-  // Heavy aggregate median
-  if (currentPeriod > 0) {
-    children.push(h('path', { key: 'hm', d: p2s(avgOfMedians), fill: 'none', stroke: COLORS.red, strokeWidth: 4, strokeDasharray: '10,5', opacity: 1, strokeLinejoin: 'round' }));
-  }
-
-  // Heavy aggregate average
-  if (currentPeriod > 0) {
-    children.push(h('path', { key: 'ha', d: p2s(avgOfAvgs), fill: 'none', stroke: COLORS.gold, strokeWidth: 4.5, opacity: 1, strokeLinejoin: 'round' }));
-  }
+  // Ensemble average
+  if(cp>0) ch.push(e('path',{key:'avg',d:makePath(st.ea,cp,sc.xS,sc.yS,sc.minV),fill:'none',stroke:C.gold,strokeWidth:3.5,opacity:1}));
 
   // End labels
-  if (currentPeriod > 8) {
-    const eY = yS(Math.max(lastAA, minVal));
-    children.push(h('circle', { key: 'ec', cx: xS(currentPeriod), cy: eY, r: 6, fill: COLORS.gold }));
-    children.push(h('rect', { key: 'er', x: xS(currentPeriod) + 10, y: eY - 26, width: 96, height: 40, rx: 4, fill: COLORS.bg, fillOpacity: 0.94, stroke: COLORS.gold, strokeOpacity: 0.4 }));
-    children.push(h('text', { key: 'et1', x: xS(currentPeriod) + 16, y: eY - 10, fill: COLORS.gold, fontSize: 10, fontWeight: 'bold', fontFamily: "'DM Sans', sans-serif" }, 'Avg of Averages'));
-    children.push(h('text', { key: 'et2', x: xS(currentPeriod) + 16, y: eY + 8, fill: COLORS.goldLight, fontSize: 11, fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace" }, formatMoney(lastAA)));
+  if(cp>4){
+    var lE=st.ea[cp]||CFG.start, lM=st.mp[cp]||CFG.start;
+    var eY=sc.yS(Math.max(lE,sc.minV)), mY=sc.yS(Math.max(lM,sc.minV));
 
-    const mY = yS(Math.max(lastAM, minVal));
-    children.push(h('circle', { key: 'mc', cx: xS(currentPeriod), cy: mY, r: 6, fill: COLORS.red }));
-    children.push(h('rect', { key: 'mr', x: xS(currentPeriod) + 10, y: mY - 26, width: 96, height: 40, rx: 4, fill: COLORS.bg, fillOpacity: 0.94, stroke: COLORS.red, strokeOpacity: 0.4 }));
-    children.push(h('text', { key: 'mt1', x: xS(currentPeriod) + 16, y: mY - 10, fill: COLORS.red, fontSize: 10, fontWeight: 'bold', fontFamily: "'DM Sans', sans-serif" }, 'Avg of Medians'));
-    children.push(h('text', { key: 'mt2', x: xS(currentPeriod) + 16, y: mY + 8, fill: COLORS.red, fontSize: 11, fontWeight: 'bold', fontFamily: "'JetBrains Mono', monospace" }, formatMoney(lastAM)));
+    ch.push(e('circle',{key:'ec',cx:sc.xS(cp),cy:eY,r:5,fill:C.gold}));
+    ch.push(e('rect',{key:'er',x:sc.xS(cp)+8,y:eY-24,width:88,height:36,rx:4,fill:C.bg,fillOpacity:0.92,stroke:C.gold,strokeOpacity:0.3}));
+    ch.push(e('text',{key:'et1',x:sc.xS(cp)+14,y:eY-9,fill:C.gold,fontSize:11,fontWeight:'bold',fontFamily:"'DM Sans', sans-serif"},'Average'));
+    ch.push(e('text',{key:'et2',x:sc.xS(cp)+14,y:eY+7,fill:C.goldLight,fontSize:10,fontFamily:"'JetBrains Mono', monospace"},fm(lE)));
+
+    ch.push(e('circle',{key:'mc',cx:sc.xS(cp),cy:mY,r:5,fill:C.red}));
+    ch.push(e('rect',{key:'mr',x:sc.xS(cp)+8,y:mY-24,width:88,height:36,rx:4,fill:C.bg,fillOpacity:0.92,stroke:C.red,strokeOpacity:0.3}));
+    ch.push(e('text',{key:'mt1',x:sc.xS(cp)+14,y:mY-9,fill:C.red,fontSize:11,fontWeight:'bold',fontFamily:"'DM Sans', sans-serif"},'Median'));
+    ch.push(e('text',{key:'mt2',x:sc.xS(cp)+14,y:mY+7,fill:C.red,fontSize:10,fontFamily:"'JetBrains Mono', monospace"},fm(lM)));
   }
 
-  // Border
-  children.push(h('rect', { key: 'bdr', x: pad.left, y: pad.top, width: cW, height: cH, fill: 'none', stroke: COLORS.border }));
-
-  return h('svg', { viewBox: '0 0 ' + width + ' ' + height, style: { width: '100%', height: 'auto', display: 'block' } }, children);
+  ch.push(e('rect',{key:'bdr',x:pad.l,y:pad.t,width:cW,height:cH,fill:'none',stroke:C.border}));
+  return e('svg',{viewBox:'0 0 '+w+' '+h, style:{width:'100%',height:'auto',display:'block'}},ch);
 }
 
-function InsightCard({ title, children, color, visible }) {
-  if (!visible) return null;
-  return h('div', { style: { background: COLORS.bgCard, border: '1px solid ' + color + '33', borderLeft: '3px solid ' + color, borderRadius: 8, padding: '14px 18px', marginBottom: 12 } },
-    h('div', { style: { fontSize: 13, fontWeight: 700, color: color, marginBottom: 6, fontFamily: "'DM Sans', sans-serif", textTransform: 'uppercase', letterSpacing: '0.05em' } }, title),
-    h('div', { style: { fontSize: 14, color: COLORS.text, lineHeight: 1.6, fontFamily: "'DM Sans', sans-serif" } }, children)
-  );
-}
+function Sim1() {
+  var s=_s(function(){return genOutcomes(CFG.investors, CFG.weeks);}), oc=s[0], setOc=s[1];
+  var s2=_s(0), cp=s2[0], setCp=s2[1];
+  var s3=_s(false), playing=s3[0], setPlaying=s3[1];
+  var s4=_s(30), speed=s4[0], setSpeed=s4[1];
+  var s5=_s(4), steps=s5[0], setSteps=s5[1];
+  var ref=_r(null);
 
-function InfoBox({ title, children }) {
-  return h('div', { style: { background: COLORS.bgCard, borderRadius: 8, padding: 16, border: '1px solid ' + COLORS.border } },
-    h('div', { style: { fontSize: 11, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 } }, title),
-    h('div', { style: { fontSize: 14, color: COLORS.text, lineHeight: 1.5 } }, children)
-  );
-}
+  var dp=_m(function(){return calcPaths(oc,cp,CFG.display);},[oc,cp]);
+  var st=_m(function(){return calcStats(oc,cp,CFG.investors);},[oc,cp]);
 
-function StatCard({ label, value, detail, color, sub }) {
-  return h('div', { style: { background: COLORS.bgCard, borderRadius: 8, padding: '14px 16px', border: '1px solid ' + COLORS.border } },
-    h('div', { style: { fontSize: 10, color: COLORS.textDim, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 } }, label),
-    h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8 } },
-      h('span', { style: { fontSize: 18, fontWeight: 700, color: color, fontFamily: "'JetBrains Mono', monospace" } }, value),
-      detail ? h('span', { style: { fontSize: 12, fontWeight: 600, color: color, fontFamily: "'JetBrains Mono', monospace", opacity: 0.7 } }, detail) : null
-    ),
-    h('div', { style: { fontSize: 11, color: COLORS.textDim, marginTop: 4, fontStyle: 'italic' } }, sub)
-  );
-}
+  var bPct=((st.below/CFG.investors)*100).toFixed(0);
+  var rPct=((st.ruined/CFG.investors)*100).toFixed(0);
+  var aRet=cp>0?((st.fA/CFG.start-1)*100):0;
+  var mRet=cp>0?((st.fM/CFG.start-1)*100):0;
 
-function App() {
-  const { numRuns, investorsPerRun, totalWeeks, startingWealth, gainMultiplier, lossMultiplier, weeksPerYear } = SIM_CONFIG;
-  const totalInvestorsAll = numRuns * investorsPerRun;
-
-  const [allOutcomes, setAllOutcomes] = useState(() => generateAllRuns(numRuns, investorsPerRun, totalWeeks, gainMultiplier, lossMultiplier));
-  const [currentPeriod, setCurrentPeriod] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(30);
-  const [stepsPerTick, setStepsPerTick] = useState(4);
-  const intervalRef = useRef(null);
-
-  const allRunStats = useMemo(() => allOutcomes.map(o => calculateRunStats(o, currentPeriod, startingWealth, investorsPerRun)), [allOutcomes, currentPeriod]);
-  const aggregateLines = useMemo(() => calculateAggregateLines(allRunStats, currentPeriod, startingWealth), [allRunStats, currentPeriod]);
-
-  const avgOfAvgsFinal = allRunStats.reduce((a, s) => a + s.finalAvg, 0) / numRuns;
-  const avgOfMediansFinal = allRunStats.reduce((a, s) => a + s.finalMedian, 0) / numRuns;
-  const totalRuined = allRunStats.reduce((a, s) => a + s.ruinedCount, 0);
-  const totalBelow = allRunStats.reduce((a, s) => a + s.belowStart, 0);
-  const ruinedPct = ((totalRuined / totalInvestorsAll) * 100).toFixed(0);
-  const belowPct = ((totalBelow / totalInvestorsAll) * 100).toFixed(0);
-  const runsUp = allRunStats.filter(s => s.finalAvg > startingWealth).length;
-  const avgRet = currentPeriod > 0 ? ((avgOfAvgsFinal / startingWealth - 1) * 100) : 0;
-  const medRet = currentPeriod > 0 ? ((avgOfMediansFinal / startingWealth - 1) * 100) : 0;
-  const curYear = (currentPeriod / weeksPerYear).toFixed(1);
-
-  useEffect(() => {
-    if (isPlaying) {
-      intervalRef.current = setInterval(() => {
-        setCurrentPeriod(prev => {
-          const next = prev + stepsPerTick;
-          if (next >= totalWeeks) { setIsPlaying(false); return totalWeeks; }
-          return next;
-        });
+  _e(function(){
+    if(playing){
+      ref.current=setInterval(function(){
+        setCp(function(p){var n=p+steps; if(n>=CFG.weeks){setPlaying(false);return CFG.weeks;} return n;});
       }, speed);
     }
-    return () => clearInterval(intervalRef.current);
-  }, [isPlaying, speed, stepsPerTick]);
+    return function(){clearInterval(ref.current);};
+  },[playing,speed,steps]);
 
-  const handleReset = useCallback(() => {
-    setIsPlaying(false);
-    setCurrentPeriod(0);
-    setAllOutcomes(generateAllRuns(numRuns, investorsPerRun, totalWeeks, gainMultiplier, lossMultiplier));
-  }, []);
+  var reset=_c(function(){setPlaying(false);setCp(0);setOc(genOutcomes(CFG.investors,CFG.weeks));},[]);
+  var toggle=_c(function(){
+    if(cp>=CFG.weeks){reset();setTimeout(function(){setPlaying(true);},50);}
+    else setPlaying(function(p){return !p;});
+  },[cp,reset]);
 
-  const handlePlayPause = useCallback(() => {
-    if (currentPeriod >= totalWeeks) { handleReset(); setTimeout(() => setIsPlaying(true), 50); }
-    else setIsPlaying(p => !p);
-  }, [currentPeriod, handleReset]);
+  var done=cp>=CFG.weeks;
 
-  const showSetup = currentPeriod === 0;
-  const showEarly = currentPeriod >= 4 && currentPeriod < 26;
-  const showMid = currentPeriod >= 26 && currentPeriod < 78;
-  const showLate = currentPeriod >= 78 && currentPeriod < totalWeeks;
-  const showFinal = currentPeriod >= totalWeeks;
+  return e('div', null,
+    // Chart
+    e('div',{style:{background:C.bgCard, borderRadius:12, border:'1px solid '+C.border, padding:20, marginBottom:20}},
+      e(SingleChart, {cp:cp, dp:dp, st:st})
+    ),
 
-  return h('div', { style: { background: COLORS.bg, minHeight: '100vh', color: COLORS.text, fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", padding: '32px 24px' } },
-    h('div', { style: { maxWidth: 900, margin: '0 auto' } },
+    // Controls
+    e('div',{style:{display:'flex',alignItems:'center',gap:14,marginBottom:24,flexWrap:'wrap'}},
+      e('button',{onClick:toggle,style:{background:playing?C.red:C.gold,color:C.bg,border:'none',borderRadius:8,padding:'10px 24px',fontSize:14,fontWeight:700,cursor:'pointer',fontFamily:"'DM Sans', sans-serif"}},
+        done?'\u21BB New Simulation':playing?'\u275A\u275A Pause':'\u25B6 Play'),
+      e('button',{onClick:reset,style:{background:'transparent',color:C.textMuted,border:'1px solid '+C.border,borderRadius:8,padding:'10px 20px',fontSize:14,fontWeight:500,cursor:'pointer'}},'Reset'),
+      e(SpeedControls,{steps:steps,setSpeed:setSpeed,setSteps:setSteps}),
+      e('div',{style:{fontSize:13,color:C.textDim,fontFamily:"'JetBrains Mono', monospace"}},'Week '+cp+' \u00B7 Year '+(cp/CFG.wpy).toFixed(1))
+    ),
 
-      // Header
-      h('div', { style: { marginBottom: 28 } },
-        h('div', { style: { fontSize: 11, fontWeight: 600, color: COLORS.gold, textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 8 } }, 'Anderson Quantrend Limited'),
-        h('h1', { style: { fontSize: 32, fontWeight: 800, color: COLORS.text, margin: 0, lineHeight: 1.2, fontFamily: "'Playfair Display', serif" } }, 'The Ergodicity Problem'),
-        h('p', { style: { fontSize: 15, color: COLORS.textMuted, marginTop: 6, marginBottom: 0, lineHeight: 1.5, fontStyle: 'italic' } },
-          numRuns + ' independent simulations \u2014 ' + investorsPerRun + ' investors each \u2014 ' + totalInvestorsAll.toLocaleString() + ' investor-paths'),
-        h('p', { style: { fontSize: 16, color: COLORS.textMuted, marginTop: 10, lineHeight: 1.6, maxWidth: 740 } },
-          'Was the result a fluke? We run the experiment ' + numRuns + ' separate times. The thin lines show each individual simulation. The ',
-          h('strong', { style: { color: COLORS.gold } }, 'heavy gold line'),
-          ' is the average of all ' + numRuns + ' ensemble averages \u2014 the industry\u2019s number, squared. The ',
-          h('strong', { style: { color: COLORS.red } }, 'heavy red dashed line'),
-          ' is the average of all ' + numRuns + ' medians \u2014 the typical investor\u2019s truth, confirmed across every run.')
+    // Stats
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}},
+      e(StatCard,{label:'Ensemble Average',value:fm(st.fA),detail:cp>0?fp(aRet):'\u2014',color:C.gold,sub:'Across all '+CFG.investors+' investors'}),
+      e(StatCard,{label:'Median Investor',value:fm(st.fM),detail:cp>0?fp(mRet):'\u2014',color:C.red,sub:'The typical experience'}),
+      e(StatCard,{label:'Below Starting Wealth',value:st.below+' / '+CFG.investors,detail:bPct+'%',color:parseInt(bPct)>50?C.red:C.textMuted,sub:'Worse off than they started'}),
+      e(StatCard,{label:'Effectively Ruined',value:st.ruined+' / '+CFG.investors,detail:rPct+'%',color:parseInt(rPct)>30?C.red:C.textMuted,sub:'Lost 90%+ of starting wealth'})
+    ),
+
+    // Insights
+    e(InsightCard,{title:'Watch',color:C.accent,visible:cp===0},
+      'Press ', e('strong',null,'Play'), '. The ', e('span',{style:{color:C.gold,fontWeight:700}},'gold line'), ' is the ensemble average across all '+CFG.investors+' investors. The ', e('span',{style:{color:C.red,fontWeight:700}},'red dashed line'), ' is the median \u2014 the investor in the middle. The coloured lines are 20 individual investors. You would be one of those coloured lines.'),
+
+    e(InsightCard,{title:'The Divergence',color:C.gold,visible:cp>=4&&cp<52},
+      'The gold average is climbing. Most individual paths are not. The median is already drifting below the average. This gap between what the average says and what individuals experience is the ergodicity problem becoming visible.'),
+
+    e(InsightCard,{title:'Year One',color:C.red,visible:cp>=52&&cp<CFG.weeks},
+      e('strong',null,bPct+'%'), ' of investors are below their starting wealth \u2014 despite a game with a positive average return. The average is being sustained by a shrinking number of increasingly lucky investors. Most are losing. The average is real. It is also irrelevant to almost everyone playing.'),
+
+    e(InsightCard,{title:'The Result',color:C.green,visible:done},
+      e('strong',null,'The ensemble average: '+fm(st.fA)+' ('+fp(aRet)+'). The median: '+fm(st.fM)+' ('+fp(mRet)+').'),
+      e('span',{style:{display:'block',marginTop:10}},
+        bPct+'% of investors are below their starting wealth. '+rPct+'% are effectively ruined. The average climbed while most individuals were destroyed. Same game. Same maths. Two completely different outcomes depending on whether you measure across people or through time.'))
+  );
+}
+
+// ─── SIMULATION 2: 20 Overlaid Runs ───
+
+function MultiChart(props) {
+  var cp=props.cp, tp=CFG.weeks, ars=props.ars, agg=props.agg;
+  var w=840, h=500, pad={t:30,r:110,b:50,l:80}, cW=w-pad.l-pad.r, cH=h-pad.t-pad.b;
+
+  var allV=[CFG.start];
+  ars.forEach(function(s){
+    s.ea.slice(0,cp+1).forEach(function(v){if(v>0)allV.push(v);});
+    s.mp.slice(0,cp+1).forEach(function(v){if(v>0)allV.push(v);});
+  });
+
+  var sc=chartScales(allV,CFG.start,cp,tp,pad,cW,cH);
+  var ch=[e('rect',{key:'bg',x:0,y:0,width:w,height:h,fill:C.bg,rx:8})];
+  ch=ch.concat(chartGrid(sc,pad,w,h,tp));
+
+  ch.push(e('text',{key:'xl',x:pad.l+cW/2,y:h-6,textAnchor:'middle',fill:C.textMuted,fontSize:12,fontFamily:"'DM Sans', sans-serif"},'Years'));
+  ch.push(e('text',{key:'yl',x:14,y:pad.t+cH/2,textAnchor:'middle',fill:C.textMuted,fontSize:12,fontFamily:"'DM Sans', sans-serif",transform:'rotate(-90,14,'+(pad.t+cH/2)+')'},'Portfolio Value (log scale)'));
+
+  var sY=sc.yS(CFG.start);
+  ch.push(e('line',{key:'sl',x1:pad.l,y1:sY,x2:w-pad.r,y2:sY,stroke:C.textDim,strokeDasharray:'8,4',opacity:0.4}));
+  ch.push(e('text',{key:'slt',x:w-pad.r+5,y:sY+4,fill:C.textDim,fontSize:9,fontFamily:"'JetBrains Mono', monospace"},'\u00A3100k'));
+
+  // Thin medians
+  ars.forEach(function(s,r){
+    ch.push(e('path',{key:'tm'+r,d:makePath(s.mp,cp,sc.xS,sc.yS,sc.minV),fill:'none',stroke:C.red,strokeWidth:1,strokeDasharray:'4,3',opacity:0.2,strokeLinejoin:'round'}));
+  });
+  // Thin averages
+  ars.forEach(function(s,r){
+    ch.push(e('path',{key:'ta'+r,d:makePath(s.ea,cp,sc.xS,sc.yS,sc.minV),fill:'none',stroke:C.gold,strokeWidth:1,opacity:0.2,strokeLinejoin:'round'}));
+  });
+  // Heavy median
+  if(cp>0) ch.push(e('path',{key:'hm',d:makePath(agg.am,cp,sc.xS,sc.yS,sc.minV),fill:'none',stroke:C.red,strokeWidth:4,strokeDasharray:'10,5',opacity:1,strokeLinejoin:'round'}));
+  // Heavy average
+  if(cp>0) ch.push(e('path',{key:'ha',d:makePath(agg.aa,cp,sc.xS,sc.yS,sc.minV),fill:'none',stroke:C.gold,strokeWidth:4.5,opacity:1,strokeLinejoin:'round'}));
+
+  // End labels
+  if(cp>8){
+    var lA=agg.aa[agg.aa.length-1]||CFG.start, lM=agg.am[agg.am.length-1]||CFG.start;
+    var eY=sc.yS(Math.max(lA,sc.minV)), mY=sc.yS(Math.max(lM,sc.minV));
+    ch.push(e('circle',{key:'ec',cx:sc.xS(cp),cy:eY,r:6,fill:C.gold}));
+    ch.push(e('rect',{key:'er',x:sc.xS(cp)+10,y:eY-26,width:96,height:40,rx:4,fill:C.bg,fillOpacity:0.94,stroke:C.gold,strokeOpacity:0.4}));
+    ch.push(e('text',{key:'et1',x:sc.xS(cp)+16,y:eY-10,fill:C.gold,fontSize:10,fontWeight:'bold',fontFamily:"'DM Sans', sans-serif"},'Avg of Averages'));
+    ch.push(e('text',{key:'et2',x:sc.xS(cp)+16,y:eY+8,fill:C.goldLight,fontSize:11,fontWeight:'bold',fontFamily:"'JetBrains Mono', monospace"},fm(lA)));
+    ch.push(e('circle',{key:'mc',cx:sc.xS(cp),cy:mY,r:6,fill:C.red}));
+    ch.push(e('rect',{key:'mr',x:sc.xS(cp)+10,y:mY-26,width:96,height:40,rx:4,fill:C.bg,fillOpacity:0.94,stroke:C.red,strokeOpacity:0.4}));
+    ch.push(e('text',{key:'mt1',x:sc.xS(cp)+16,y:mY-10,fill:C.red,fontSize:10,fontWeight:'bold',fontFamily:"'DM Sans', sans-serif"},'Avg of Medians'));
+    ch.push(e('text',{key:'mt2',x:sc.xS(cp)+16,y:mY+8,fill:C.red,fontSize:11,fontWeight:'bold',fontFamily:"'JetBrains Mono', monospace"},fm(lM)));
+  }
+
+  ch.push(e('rect',{key:'bdr',x:pad.l,y:pad.t,width:cW,height:cH,fill:'none',stroke:C.border}));
+  return e('svg',{viewBox:'0 0 '+w+' '+h,style:{width:'100%',height:'auto',display:'block'}},ch);
+}
+
+function Sim2() {
+  var s=_s(genAllRuns), ao=s[0], setAo=s[1];
+  var s2=_s(0), cp=s2[0], setCp=s2[1];
+  var s3=_s(false), playing=s3[0], setPlaying=s3[1];
+  var s4=_s(30), speed=s4[0], setSpeed=s4[1];
+  var s5=_s(4), steps=s5[0], setSteps=s5[1];
+  var ref=_r(null);
+
+  var ars=_m(function(){return ao.map(function(o){return calcStats(o,cp,CFG.investors);});},[ao,cp]);
+  var agg=_m(function(){return calcAgg(ars,cp);},[ars,cp]);
+
+  var tot=CFG.runs*CFG.investors;
+  var aaf=ars.reduce(function(a,s){return a+s.fA;},0)/CFG.runs;
+  var amf=ars.reduce(function(a,s){return a+s.fM;},0)/CFG.runs;
+  var tRuined=ars.reduce(function(a,s){return a+s.ruined;},0);
+  var tBelow=ars.reduce(function(a,s){return a+s.below;},0);
+  var rPct=((tRuined/tot)*100).toFixed(0);
+  var bPct=((tBelow/tot)*100).toFixed(0);
+  var runsUp=ars.filter(function(s){return s.fA>CFG.start;}).length;
+  var aRet=cp>0?((aaf/CFG.start-1)*100):0;
+  var mRet=cp>0?((amf/CFG.start-1)*100):0;
+
+  _e(function(){
+    if(playing){
+      ref.current=setInterval(function(){
+        setCp(function(p){var n=p+steps; if(n>=CFG.weeks){setPlaying(false);return CFG.weeks;} return n;});
+      },speed);
+    }
+    return function(){clearInterval(ref.current);};
+  },[playing,speed,steps]);
+
+  var reset=_c(function(){setPlaying(false);setCp(0);setAo(genAllRuns());},[]);
+  var toggle=_c(function(){
+    if(cp>=CFG.weeks){reset();setTimeout(function(){setPlaying(true);},50);}
+    else setPlaying(function(p){return !p;});
+  },[cp,reset]);
+
+  var done=cp>=CFG.weeks;
+
+  return e('div',null,
+    e('div',{style:{background:C.bgCard,borderRadius:12,border:'1px solid '+C.border,padding:20,marginBottom:20}},
+      e(MultiChart,{cp:cp,ars:ars,agg:agg})
+    ),
+
+    e('div',{style:{display:'flex',alignItems:'center',gap:14,marginBottom:24,flexWrap:'wrap'}},
+      e('button',{onClick:toggle,style:{background:playing?C.red:C.gold,color:C.bg,border:'none',borderRadius:8,padding:'10px 24px',fontSize:14,fontWeight:700,cursor:'pointer',fontFamily:"'DM Sans', sans-serif"}},
+        done?'\u21BB New Simulations':playing?'\u275A\u275A Pause':'\u25B6 Play'),
+      e('button',{onClick:reset,style:{background:'transparent',color:C.textMuted,border:'1px solid '+C.border,borderRadius:8,padding:'10px 20px',fontSize:14,fontWeight:500,cursor:'pointer'}},'Reset'),
+      e(SpeedControls,{steps:steps,setSpeed:setSpeed,setSteps:setSteps}),
+      e('div',{style:{fontSize:13,color:C.textDim,fontFamily:"'JetBrains Mono', monospace"}},'Week '+cp+' \u00B7 Year '+(cp/CFG.wpy).toFixed(1))
+    ),
+
+    e('div',{style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:24}},
+      e(StatCard,{label:'Avg of Averages',value:fm(aaf),detail:cp>0?fp(aRet):'\u2014',color:C.gold,sub:"The industry's number"}),
+      e(StatCard,{label:'Avg of Medians',value:fm(amf),detail:cp>0?fp(mRet):'\u2014',color:C.red,sub:'The typical experience'}),
+      e(StatCard,{label:'Below Starting Wealth',value:bPct+'%',detail:tBelow.toLocaleString()+' paths',color:parseInt(bPct)>50?C.red:C.textMuted,sub:'Of '+tot.toLocaleString()+' total'}),
+      e(StatCard,{label:'Effectively Ruined',value:rPct+'%',detail:tRuined.toLocaleString()+' paths',color:parseInt(rPct)>30?C.red:C.textMuted,sub:'Lost 90%+ across all runs'})
+    ),
+
+    e(InsightCard,{title:'Watch the Bands',color:C.accent,visible:cp===0},
+      'Press ', e('strong',null,'Play'), '. Each thin gold line is one simulation\u2019s ensemble average. Each thin red line is one simulation\u2019s median. The heavy lines are the averages across all 20 runs. If the pattern is structural, the gold band should rise and the red band should fall \u2014 every single time.'),
+
+    e(InsightCard,{title:'Two Bands, No Overlap',color:C.gold,visible:cp>=4&&cp<78},
+      'The gold lines cluster together \u2014 all rising. The red lines cluster together \u2014 all falling. No run produces a falling average. No run produces a rising median. 20 independent experiments, 20 identical patterns. This is structure, not luck.'),
+
+    e(InsightCard,{title:'The Verdict',color:C.red,visible:cp>=78&&cp<CFG.weeks},
+      e('strong',null,runsUp), ' out of '+CFG.runs+' ensemble averages are above starting wealth. Meanwhile ', e('strong',null,bPct+'%'),
+      ' of all '+tot.toLocaleString()+' investor-paths are below where they started. ', e('strong',null,rPct+'%'), ' are effectively ruined.'),
+
+    e(InsightCard,{title:'The Proof',color:C.green,visible:done},
+      e('strong',null,'Twenty times. '+tot.toLocaleString()+' paths. The same result. Every time.'),
+      e('span',{style:{display:'block',marginTop:10}},
+        'Average of all ensemble averages: '+fm(aaf)+' ('+fp(aRet)+'). Average of all medians: '+fm(amf)+' ('+fp(mRet)+'). The divergence is not noise \u2014 it is the mathematical signature of non-ergodicity in multiplicative systems. It cannot be diversified, optimised, or managed away.'),
+      e('span',{style:{display:'block',marginTop:12,color:C.gold,fontWeight:600}},
+        'AQL\u2019s DARE\u2122 system is built for this reality. Not optimising for the average that nobody experiences, but protecting the compounding path that each investor actually walks.'))
+  );
+}
+
+// ─── MAIN APP ───
+
+function App() {
+  return e('div',{style:{background:C.bg,minHeight:'100vh',color:C.text,fontFamily:"'DM Sans', 'Helvetica Neue', sans-serif",padding:'32px 24px'}},
+    e('div',{style:{maxWidth:900,margin:'0 auto'}},
+
+      // ═══ HEADER ═══
+      e('div',{style:{marginBottom:28}},
+        e('div',{style:{fontSize:11,fontWeight:600,color:C.gold,textTransform:'uppercase',letterSpacing:'0.15em',marginBottom:8}},'Anderson Quantrend Limited'),
+        e('h1',{style:{fontSize:32,fontWeight:800,color:C.text,margin:0,lineHeight:1.2,fontFamily:"'Playfair Display', serif"}},'The Ergodicity Problem'),
+        e('p',{style:{fontSize:15,color:C.textMuted,marginTop:6,marginBottom:0,lineHeight:1.5,fontStyle:'italic'}},'Why the average return is real but irrelevant')
       ),
 
-      // Info boxes
-      h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 24 } },
-        h(InfoBox, { title: numRuns + ' Independent Runs' },
-          'Each: ' + investorsPerRun + ' investors, 260 weekly coin flips (+50%/\u221240%). Fresh randomness every time. ' + totalInvestorsAll.toLocaleString() + ' total paths.'),
-        h(InfoBox, { title: 'Heavy Gold Line' },
-          'The average of all ' + numRuns + ' ensemble averages. If the industry\u2019s number is reliable, this should rise confidently.'),
-        h(InfoBox, { title: 'Heavy Red Line' },
-          'The average of all ' + numRuns + ' medians. If the typical investor fares well, this should track the gold. Watch the gap.')
+      // ═══ THE GAME ═══
+      e('div',{style:{marginBottom:28,padding:'20px 24px',background:C.bgCard,borderRadius:10,border:'1px solid '+C.border}},
+        e('div',{style:{fontSize:13,fontWeight:700,color:C.text,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:10}},'The Game'),
+        e('p',{style:{fontSize:15,color:C.textMuted,lineHeight:1.7,marginBottom:12}},
+          'Imagine 100 investors, each starting with \u00A3100,000. Every week, a fair coin is flipped. ',
+          e('span',{style:{color:C.green,fontWeight:600}},'Heads: +50%'),'. ',
+          e('span',{style:{color:C.red,fontWeight:600}},'Tails: \u221240%'),
+          '. This game has a ', e('strong',{style:{color:C.gold}},'+5% average return per week'),
+          ' \u2014 a number any fund manager would proudly report. It is mathematically correct. It is also catastrophically misleading.'),
+        e('p',{style:{fontSize:15,color:C.textMuted,lineHeight:1.7,marginBottom:12}},
+          'The +5% is an ', e('em',null,'ensemble average'),
+          ' \u2014 what you get by averaging across all 100 investors at a single moment. But each individual investor experiences a ',
+          e('em',null,'time average'),
+          ': their wealth compounds through a sequence of gains and losses. The compound growth rate is \u221A(1.5 \u00D7 0.6) \u2212 1 = ',
+          e('strong',{style:{color:C.red}},'\u22125.13% per week'),
+          '. That negative sign means that over time, most investors are ground down toward zero \u2014 even though the average across all of them keeps rising.'),
+        e('p',{style:{fontSize:15,color:C.textMuted,lineHeight:1.7}},
+          'When the ensemble average and the time average give different answers, the system is called ',
+          e('strong',{style:{color:C.text}},'non-ergodic'),
+          '. Investment returns are non-ergodic. Traditional finance assumes they are ergodic. This simulation shows what that assumption costs.')
       ),
 
-      // Chart
-      h('div', { style: { background: COLORS.bgCard, borderRadius: 12, border: '1px solid ' + COLORS.border, padding: 20, marginBottom: 20 } },
-        h(SimulationChart, { allRunStats, aggregateLines, currentPeriod, totalPeriods: totalWeeks, startingWealth })
+      // ═══ PART 1: SINGLE RUN ═══
+      e('div',{style:{marginBottom:8}},
+        e('h2',{style:{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'Playfair Display', serif",marginBottom:6}},'Part 1: Experience It'),
+        e('p',{style:{fontSize:15,color:C.textMuted,lineHeight:1.6,marginBottom:20}},
+          '100 investors. 260 weekly coin flips over 5 years. We show you 20 individual paths alongside the ensemble average and median. Watch the ',
+          e('span',{style:{color:C.gold,fontWeight:600}},'gold average'),
+          ' climb while most ',
+          e('span',{style:{color:'#60a5fa',fontWeight:600}},'individual paths'),
+          ' collapse.')
       ),
 
-      // Controls
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24, flexWrap: 'wrap' } },
-        h('button', {
-          onClick: handlePlayPause,
-          style: { background: isPlaying ? COLORS.red : COLORS.gold, color: COLORS.bg, border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif" }
-        }, currentPeriod >= totalWeeks ? '\u21BB New Simulations' : isPlaying ? '\u275A\u275A Pause' : '\u25B6 Play'),
-
-        h('button', {
-          onClick: handleReset,
-          style: { background: 'transparent', color: COLORS.textMuted, border: '1px solid ' + COLORS.border, borderRadius: 8, padding: '10px 20px', fontSize: 14, fontWeight: 500, cursor: 'pointer' }
-        }, 'Reset'),
-
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' } },
-          h('span', { style: { fontSize: 12, color: COLORS.textDim } }, 'Speed:'),
-          [{ label: '1\u00D7', val: 50, steps: 1 }, { label: '4\u00D7', val: 30, steps: 4 }, { label: '13\u00D7', val: 20, steps: 13 }].map(({ label, val, steps }) =>
-            h('button', {
-              key: label,
-              onClick: () => { setSpeed(val); setStepsPerTick(steps); },
-              style: {
-                background: stepsPerTick === steps ? COLORS.accent + '33' : 'transparent',
-                color: stepsPerTick === steps ? COLORS.accent : COLORS.textDim,
-                border: '1px solid ' + (stepsPerTick === steps ? COLORS.accent + '55' : COLORS.border),
-                borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer',
-                fontFamily: "'JetBrains Mono', monospace",
-              }
-            }, label)
-          )
-        ),
-
-        h('div', { style: { fontSize: 13, color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" } },
-          'Week ' + currentPeriod + ' \u00B7 Year ' + curYear)
+      // Info boxes for Sim 1
+      e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:20}},
+        e(InfoBox,{title:'Gold Line'},
+          'Ensemble average across all 100 investors. The number the industry reports.'),
+        e(InfoBox,{title:'Red Dashed Line'},
+          'The median \u2014 the investor in the middle. A far better measure of the typical experience.'),
+        e(InfoBox,{title:'Coloured Lines'},
+          '20 individual investors. Each is one person\u2019s wealth over time. Lines turn red at 90%+ loss. You would be one of these.')
       ),
 
-      // Stats
-      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 28 } },
-        h(StatCard, { label: 'Avg of Averages', value: formatMoney(avgOfAvgsFinal), detail: currentPeriod > 0 ? formatPct(avgRet) : '\u2014', color: COLORS.gold, sub: "The industry\u2019s number" }),
-        h(StatCard, { label: 'Avg of Medians', value: formatMoney(avgOfMediansFinal), detail: currentPeriod > 0 ? formatPct(medRet) : '\u2014', color: COLORS.red, sub: 'The typical experience' }),
-        h(StatCard, { label: 'Below Starting Wealth', value: belowPct + '%', detail: totalBelow.toLocaleString() + ' paths', color: parseInt(belowPct) > 50 ? COLORS.red : COLORS.textMuted, sub: 'Of ' + totalInvestorsAll.toLocaleString() + ' total' }),
-        h(StatCard, { label: 'Effectively Ruined', value: ruinedPct + '%', detail: totalRuined.toLocaleString() + ' paths', color: parseInt(ruinedPct) > 30 ? COLORS.red : COLORS.textMuted, sub: 'Lost 90%+ across all runs' })
+      e(Sim1,null),
+
+      // ═══ BRIDGE ═══
+      e('div',{style:{margin:'48px 0 28px', padding:'24px', background:'linear-gradient(135deg, '+C.bgCard+' 0%, #1a1f35 100%)', borderRadius:12, border:'1px solid '+C.border}},
+        e('h2',{style:{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'Playfair Display', serif",marginBottom:10}},'Was That Just Bad Luck?'),
+        e('p',{style:{fontSize:16,color:C.textMuted,lineHeight:1.7,marginBottom:12}},
+          'One simulation could be unlucky. Perhaps a different set of coin flips would tell a different story. To find out, we run the exact same experiment ',
+          e('strong',{style:{color:C.text}},'20 separate times'),
+          ' \u2014 with 2,000 investor-paths in total.'),
+        e('p',{style:{fontSize:16,color:C.textMuted,lineHeight:1.7}},
+          'This time we strip away the individual paths and focus on the pattern itself. Each simulation produces its own ensemble average and its own median. If the divergence is structural, every single run should show the same pattern: ',
+          e('span',{style:{color:C.gold,fontWeight:600}},'average rising'),
+          ', ',
+          e('span',{style:{color:C.red,fontWeight:600}},'median falling'),
+          '. No exceptions.')
       ),
 
-      // Insights
-      h(InsightCard, { title: 'The Question', color: COLORS.accent, visible: showSetup },
-        'One simulation could be unlucky. Two could be coincidence. So we run ' + numRuns + ' \u2014 with ' + totalInvestorsAll.toLocaleString() + ' investor-paths in total. If the ergodicity problem is real, the pattern should appear in every single run. Press ',
-        h('strong', null, 'Play'), '.'),
+      // ═══ PART 2: 20 RUNS ═══
+      e('div',{style:{marginBottom:8}},
+        e('h2',{style:{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'Playfair Display', serif",marginBottom:6}},'Part 2: Prove It'),
+        e('p',{style:{fontSize:15,color:C.textMuted,lineHeight:1.6,marginBottom:20}},
+          '20 independent simulations overlaid. Thin lines show each run. ',
+          e('strong',{style:{color:C.gold}},'Heavy gold'),
+          ': average of all 20 ensemble averages. ',
+          e('strong',{style:{color:C.red}},'Heavy red dashed'),
+          ': average of all 20 medians.')
+      ),
 
-      h(InsightCard, { title: 'The Bands Form', color: COLORS.gold, visible: showEarly },
-        'Watch the thin gold lines cluster into a band \u2014 all rising. The thin red lines cluster into a separate band \u2014 all falling. The heavy lines track their respective bands perfectly. ' + numRuns + ' independent experiments producing the same divergence is not coincidence. It\u2019s structure.'),
+      e(Sim2,null),
 
-      h(InsightCard, { title: 'The Gap Widens', color: COLORS.gold, visible: showMid },
-        'The ', h('strong', { style: { color: COLORS.gold } }, 'heavy gold line'), ' and the ',
-        h('strong', { style: { color: COLORS.red } }, 'heavy red line'),
-        ' are moving in opposite directions. Not drifting \u2014 accelerating apart. Every thin line behind them confirms the pattern. The separation is total.'),
-
-      h(InsightCard, { title: 'The Verdict', color: COLORS.red, visible: showLate },
-        'Across ' + numRuns + ' simulations: ', h('strong', null, runsUp), ' out of ' + numRuns + ' ensemble averages are above starting wealth. Meanwhile ',
-        h('strong', null, belowPct + '%'), ' of all ' + totalInvestorsAll.toLocaleString() + ' investor-paths are below where they started. ',
-        h('strong', null, ruinedPct + '%'), ' are effectively ruined. The industry\u2019s number works perfectly \u2014 for the industry.'),
-
-      h(InsightCard, { title: 'The Proof', color: COLORS.green, visible: showFinal },
-        h('strong', null, numRuns + ' times. ' + totalInvestorsAll.toLocaleString() + ' paths. The same result. Every time.'),
-        h('span', { style: { display: 'block', marginTop: 10 } },
-          'Average of all ensemble averages: ' + formatMoney(avgOfAvgsFinal) + ' (' + formatPct(avgRet) + '). Average of all medians: ' + formatMoney(avgOfMediansFinal) + ' (' + formatPct(medRet) + '). The divergence is not noise \u2014 it is the mathematical signature of non-ergodicity in multiplicative systems. It cannot be diversified, optimised, or managed away because it is a property of the mathematics, not the market.'),
-        h('span', { style: { display: 'block', marginTop: 12, color: COLORS.gold, fontWeight: 600 } },
-          'AQL\u2019s DARE\u2122 system is built for this reality. Not optimising for the average that nobody experiences, but protecting the compounding path that each investor actually walks.')),
-
-      // Legend
-      h('div', { style: { marginTop: 32, padding: '20px 24px', background: COLORS.bgCard, borderRadius: 10, border: '1px solid ' + COLORS.border } },
-        h('div', { style: { fontSize: 13, fontWeight: 700, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 } }, 'Reading the Chart'),
-        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, fontSize: 13, color: COLORS.textMuted, lineHeight: 1.6 } },
-          h('div', null,
-            h('span', { style: { color: COLORS.gold, fontWeight: 700 } }, '\u2501 Heavy gold'), ' \u2014 Average of all ' + numRuns + ' ensemble averages. The definitive industry number across ' + totalInvestorsAll.toLocaleString() + ' investor-paths. Thin gold lines show each run\u2019s average.'),
-          h('div', null,
-            h('span', { style: { color: COLORS.red, fontWeight: 700 } }, '\u2504 Heavy red dashed'), ' \u2014 Average of all ' + numRuns + ' medians. The definitive typical experience. Thin red lines show each run\u2019s median.'),
-          h('div', null,
-            h('span', { style: { fontWeight: 700, color: COLORS.text } }, 'The cloud'), ' \u2014 Thin lines form two distinct bands that never overlap. This visual separation is the ergodicity problem: reported returns and lived experience occupy completely different regions of the chart.'),
-          h('div', null,
-            h('span', { style: { fontWeight: 700, color: COLORS.text } }, 'Log scale'), ' \u2014 Each gridline is a 10\u00D7 change. The gap between the bands represents orders of magnitude of difference between reported and lived reality.')
+      // ═══ READING THE CHART ═══
+      e('div',{style:{marginTop:32,padding:'20px 24px',background:C.bgCard,borderRadius:10,border:'1px solid '+C.border}},
+        e('div',{style:{fontSize:13,fontWeight:700,color:C.textMuted,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:12}},'Reading the Charts'),
+        e('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,fontSize:13,color:C.textMuted,lineHeight:1.6}},
+          e('div',null,
+            e('span',{style:{color:C.gold,fontWeight:700}},'\u2501 Gold lines'),
+            ' \u2014 Ensemble averages. In Part 1, this is the average across 100 investors. In Part 2, each thin gold line is one simulation\u2019s average; the heavy gold line is the average of all 20.'),
+          e('div',null,
+            e('span',{style:{color:C.red,fontWeight:700}},'\u2504 Red dashed lines'),
+            ' \u2014 Medians. The investor in the middle. In Part 2, each thin red line is one simulation\u2019s median; the heavy red line is the average of all 20.'),
+          e('div',null,
+            e('span',{style:{fontWeight:700,color:C.text}},'Log scale'),
+            ' \u2014 Each gridline is a 10\u00D7 change in wealth. This lets you see both the enormous gains of the few and the losses of the majority on the same chart.'),
+          e('div',null,
+            e('span',{style:{fontWeight:700,color:C.text}},'The gap'),
+            ' \u2014 The distance between gold and red lines on a log scale represents orders of magnitude \u2014 not percentage points \u2014 of difference between the reported average and lived reality.')
         )
       ),
 
-      // The Mathematics
-      h('div', { style: { marginTop: 16, padding: '16px 24px', background: COLORS.bgCard, borderRadius: 10, border: '1px solid ' + COLORS.border } },
-        h('div', { style: { fontSize: 13, fontWeight: 700, color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 } }, 'The Mathematics'),
-        h('div', { style: { fontSize: 13, color: COLORS.textMuted, lineHeight: 1.7 } },
-          h('strong', { style: { color: COLORS.text } }, 'Arithmetic average'), ' (ensemble): \u00BD \u00D7 (+50%) + \u00BD \u00D7 (\u221240%) = ',
-          h('span', { style: { color: COLORS.gold } }, '+5% per flip'),
-          '. Average across many investors at one moment.',
-          h('br'), h('br'),
-          h('strong', { style: { color: COLORS.text } }, 'Geometric average'), ' (time): \u221A(1.5 \u00D7 0.6) \u2212 1 = ',
-          h('span', { style: { color: COLORS.red } }, '\u22125.13% per flip'),
-          '. Each individual\u2019s compound growth rate. The negative sign means near-certain ruin over time.',
-          h('br'), h('br'),
-          h('strong', { style: { color: COLORS.text } }, 'The gap'),
-          ': Same game. Same maths. Two completely different answers depending on whether you ask \u201Cwhat happens on average across people?\u201D or \u201Cwhat happens to one person over time?\u201D The first question is interesting. The second is the one that determines your retirement.')
+      // ═══ THE MATHEMATICS ═══
+      e('div',{style:{marginTop:16,padding:'16px 24px',background:C.bgCard,borderRadius:10,border:'1px solid '+C.border}},
+        e('div',{style:{fontSize:13,fontWeight:700,color:C.textMuted,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:8}},'The Mathematics'),
+        e('div',{style:{fontSize:13,color:C.textMuted,lineHeight:1.7}},
+          e('strong',{style:{color:C.text}},'Arithmetic average'), ' (ensemble): \u00BD \u00D7 (+50%) + \u00BD \u00D7 (\u221240%) = ',
+          e('span',{style:{color:C.gold}},'+5% per flip'), '. The average across many investors at one moment.',
+          e('br'),e('br'),
+          e('strong',{style:{color:C.text}},'Geometric average'), ' (time): \u221A(1.5 \u00D7 0.6) \u2212 1 = ',
+          e('span',{style:{color:C.red}},'\u22125.13% per flip'), '. Each individual\u2019s compound growth rate over time. The negative sign means near-certain ruin.',
+          e('br'),e('br'),
+          e('strong',{style:{color:C.text}},'The gap'), ': Same game. Same maths. Two completely different answers depending on whether you ask \u201Cwhat happens on average across people?\u201D or \u201Cwhat happens to one person over time?\u201D The first question is interesting. The second is the one that determines your retirement.')
       ),
 
-      // Attribution
-      h('div', { style: { marginTop: 20, textAlign: 'center', fontSize: 11, color: COLORS.textDim } },
+      // ═══ ATTRIBUTION ═══
+      e('div',{style:{marginTop:20,textAlign:'center',fontSize:11,color:C.textDim}},
         'Based on the work of Ole Peters & Alexander Adamou, London Mathematical Laboratory \u00B7 ',
-        h('span', { style: { color: COLORS.gold } }, 'Anderson Quantrend Limited'))
+        e('span',{style:{color:C.gold}},'Anderson Quantrend Limited'))
     )
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+ReactDOM.createRoot(document.getElementById('root')).render(e(App));
 </script>
 </body>
 </html>
